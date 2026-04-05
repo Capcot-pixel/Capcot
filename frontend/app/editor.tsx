@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, Alert
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import Slider from 'react-native-slider';
+import Slider from '@react-native-community/slider';
 import { useEditorStore } from '../src/store/editorStore';
 import type { VideoClip, FilterEffect } from '../src/types';
 
