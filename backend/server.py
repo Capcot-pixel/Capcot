@@ -463,6 +463,275 @@ async def add_transition(
 
 
 @api_router.post("/video/export")
+
+@api_router.post("/video/crop")
+async def crop_video(
+    file: UploadFile = File(...),
+    x: int = Form(...),
+    y: int = Form(...),
+    width: int = Form(...),
+    height: int = Form(...)
+):
+    """Crop video to specified dimensions"""
+    temp_input = get_temp_path()
+    temp_output = get_temp_path()
+    
+    try:
+        with open(temp_input, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Crop video
+        (
+            ffmpeg
+            .input(temp_input)
+            .output(temp_output, vf=f"crop={width}:{height}:{x}:{y}", codec='libx264', preset='medium')
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        
+        return FileResponse(
+            temp_output,
+            media_type="video/mp4",
+            filename="cropped_video.mp4"
+        )
+    except ffmpeg.Error as e:
+        logger.error(f"FFmpeg error: {e.stderr.decode()}")
+        raise HTTPException(status_code=500, detail="Video crop failed")
+    finally:
+        cleanup_file(temp_input)
+
+@api_router.post("/video/rotate")
+async def rotate_video(
+    file: UploadFile = File(...),
+    angle: int = Form(...)
+):
+    """Rotate video by angle (90, 180, 270)"""
+    temp_input = get_temp_path()
+    temp_output = get_temp_path()
+    
+    try:
+        with open(temp_input, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Rotate video
+        if angle == 90:
+            transpose = "transpose=1"  # 90 clockwise
+        elif angle == 180:
+            transpose = "transpose=2,transpose=2"  # 180
+        elif angle == 270:
+            transpose = "transpose=2"  # 90 counter-clockwise
+        else:
+            transpose = ""
+        
+        if transpose:
+            (
+                ffmpeg
+                .input(temp_input)
+                .output(temp_output, vf=transpose, codec='libx264', preset='medium')
+                .overwrite_output()
+                .run(capture_stdout=True, capture_stderr=True)
+            )
+        else:
+            # No rotation, just copy
+            shutil.copy(temp_input, temp_output)
+        
+        return FileResponse(
+            temp_output,
+            media_type="video/mp4",
+            filename=f"rotated_{angle}.mp4"
+        )
+    except ffmpeg.Error as e:
+        logger.error(f"FFmpeg error: {e.stderr.decode()}")
+        raise HTTPException(status_code=500, detail="Video rotation failed")
+    finally:
+        cleanup_file(temp_input)
+
+@api_router.post("/video/aspect-ratio")
+async def change_aspect_ratio(
+    file: UploadFile = File(...),
+    ratio: str = Form(...)  # "9:16", "16:9", "1:1", "4:5"
+):
+    """Change video aspect ratio with padding or crop"""
+    temp_input = get_temp_path()
+    temp_output = get_temp_path()
+    
+    try:
+        with open(temp_input, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Aspect ratio mapping
+        ratio_map = {
+            "9:16": "1080:1920",
+            "16:9": "1920:1080",
+            "1:1": "1080:1080",
+            "4:5": "1080:1350",
+        }
+        
+        target_size = ratio_map.get(ratio, "1920:1080")
+        
+        # Scale and pad to maintain aspect ratio
+        (
+            ffmpeg
+            .input(temp_input)
+            .output(
+                temp_output,
+                vf=f"scale={target_size}:force_original_aspect_ratio=decrease,pad={target_size}:(ow-iw)/2:(oh-ih)/2:black",
+                codec='libx264',
+                preset='medium'
+            )
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        
+        return FileResponse(
+            temp_output,
+            media_type="video/mp4",
+            filename=f"aspect_{ratio.replace(':', 'x')}.mp4"
+        )
+    except ffmpeg.Error as e:
+        logger.error(f"FFmpeg error: {e.stderr.decode()}")
+        raise HTTPException(status_code=500, detail="Aspect ratio change failed")
+    finally:
+        cleanup_file(temp_input)
+
+@api_router.post("/video/reverse")
+async def reverse_video(file: UploadFile = File(...)):
+    """Reverse video playback"""
+    temp_input = get_temp_path()
+    temp_output = get_temp_path()
+    
+    try:
+        with open(temp_input, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Reverse video
+        (
+            ffmpeg
+            .input(temp_input)
+            .output(temp_output, vf="reverse", af="areverse", codec='libx264', preset='medium')
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        
+        return FileResponse(
+            temp_output,
+            media_type="video/mp4",
+            filename="reversed.mp4"
+        )
+    except ffmpeg.Error as e:
+        logger.error(f"FFmpeg error: {e.stderr.decode()}")
+        raise HTTPException(status_code=500, detail="Video reverse failed")
+    finally:
+        cleanup_file(temp_input)
+
+@api_router.post("/video/freeze-frame")
+async def freeze_frame(
+    file: UploadFile = File(...),
+    timestamp: float = Form(...),
+    duration: float = Form(2.0)
+):
+    """Create a freeze frame effect at timestamp"""
+    temp_input = get_temp_path()
+    temp_output = get_temp_path()
+    temp_frame = get_temp_path(".jpg")
+    
+    try:
+        with open(temp_input, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Extract frame
+        (
+            ffmpeg
+            .input(temp_input, ss=timestamp)
+            .output(temp_frame, vframes=1)
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        
+        # Create video from frame
+        (
+            ffmpeg
+            .input(temp_frame, loop=1, t=duration)
+            .output(temp_output, codec='libx264', preset='medium')
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        
+        return FileResponse(
+            temp_output,
+            media_type="video/mp4",
+            filename="freeze_frame.mp4"
+        )
+    except ffmpeg.Error as e:
+        logger.error(f"FFmpeg error: {e.stderr.decode()}")
+        raise HTTPException(status_code=500, detail="Freeze frame failed")
+    finally:
+        cleanup_file(temp_input)
+        cleanup_file(temp_frame)
+
+@api_router.post("/video/extract-audio")
+async def extract_audio(file: UploadFile = File(...)):
+    """Extract audio from video"""
+    temp_input = get_temp_path()
+    temp_output = get_temp_path(".mp3")
+    
+    try:
+        with open(temp_input, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Extract audio
+        (
+            ffmpeg
+            .input(temp_input)
+            .output(temp_output, codec='libmp3lame', audio_bitrate='192k')
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        
+        return FileResponse(
+            temp_output,
+            media_type="audio/mpeg",
+            filename="extracted_audio.mp3"
+        )
+    except ffmpeg.Error as e:
+        logger.error(f"FFmpeg error: {e.stderr.decode()}")
+        raise HTTPException(status_code=500, detail="Audio extraction failed")
+    finally:
+        cleanup_file(temp_input)
+
+@api_router.post("/video/volume")
+async def adjust_volume(
+    file: UploadFile = File(...),
+    volume: float = Form(...)  # 0.0 to 2.0 (0=mute, 1=normal, 2=double)
+):
+    """Adjust video audio volume"""
+    temp_input = get_temp_path()
+    temp_output = get_temp_path()
+    
+    try:
+        with open(temp_input, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Adjust volume
+        (
+            ffmpeg
+            .input(temp_input)
+            .output(temp_output, af=f"volume={volume}", codec='libx264', preset='medium')
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        
+        return FileResponse(
+            temp_output,
+            media_type="video/mp4",
+            filename=f"volume_{int(volume*100)}.mp4"
+        )
+    except ffmpeg.Error as e:
+        logger.error(f"FFmpeg error: {e.stderr.decode()}")
+        raise HTTPException(status_code=500, detail="Volume adjustment failed")
+    finally:
+        cleanup_file(temp_input)
+
 async def export_video(
     file: UploadFile = File(...),
     resolution: str = Form("1080p"),
