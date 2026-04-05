@@ -55,8 +55,8 @@ export default function HomeScreen() {
           fileSize: video.fileSize || 0,
         });
         
-        // Navigate to editor
-        router.push('/editor-v2');
+        // Navigate to Pro Editor - Fully Functional
+        router.push('/pro-editor');
       }
     } catch (error) {
       console.error('Error picking video:', error);
