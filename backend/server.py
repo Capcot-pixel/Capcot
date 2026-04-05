@@ -311,6 +311,157 @@ async def merge_videos(files: List[UploadFile] = File(...)):
             cleanup_file(path)
         cleanup_file(temp_list)
 
+@api_router.post("/video/speed")
+async def change_speed(
+    file: UploadFile = File(...),
+    speed: float = Form(...)
+):
+    """Change video playback speed"""
+    temp_input = get_temp_path()
+    temp_output = get_temp_path()
+    
+    try:
+        with open(temp_input, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Speed control using setpts filter
+        video_filter = f"setpts={1/speed}*PTS"
+        
+        stream = ffmpeg.input(temp_input)
+        video = stream.video.filter('setpts', f'{1/speed}*PTS')
+        
+        # Handle audio if present - chain atempo filters for extreme speeds
+        try:
+            if speed > 2.0:
+                # For speeds > 2x, chain multiple atempo filters
+                audio = stream.audio.filter('atempo', 2.0).filter('atempo', speed/2.0)
+            elif speed < 0.5:
+                # For speeds < 0.5x, chain multiple atempo filters
+                audio = stream.audio.filter('atempo', 0.5).filter('atempo', speed/0.5)
+            else:
+                audio = stream.audio.filter('atempo', speed)
+            output = ffmpeg.output(video, audio, temp_output, codec='libx264')
+        except:
+            output = ffmpeg.output(video, temp_output, codec='libx264')
+        
+        output.overwrite_output().run(capture_stdout=True, capture_stderr=True)
+        
+        return FileResponse(
+            temp_output,
+            media_type="video/mp4",
+            filename=f"speed_{speed}x.mp4"
+        )
+    except ffmpeg.Error as e:
+        logger.error(f"FFmpeg error: {e.stderr.decode()}")
+        raise HTTPException(status_code=500, detail="Speed change failed")
+    finally:
+        cleanup_file(temp_input)
+
+@api_router.post("/video/text-overlay")
+async def add_text_overlay(
+    file: UploadFile = File(...),
+    text: str = Form(...),
+    font_size: int = Form(32),
+    color: str = Form("white"),
+    position_x: float = Form(0.5),
+    position_y: float = Form(0.5),
+    start_time: float = Form(0),
+    duration: float = Form(5)
+):
+    """Add text overlay to video"""
+    temp_input = get_temp_path()
+    temp_output = get_temp_path()
+    
+    try:
+        with open(temp_input, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Get video dimensions
+        probe = ffmpeg.probe(temp_input)
+        video_stream = next((s for s in probe['streams'] if s['codec_type'] == 'video'), None)
+        width = int(video_stream['width'])
+        height = int(video_stream['height'])
+        
+        # Calculate position
+        x = int(width * position_x)
+        y = int(height * position_y)
+        
+        # Create drawtext filter
+        text_filter = f"drawtext=text='{text}':fontsize={font_size}:fontcolor={color}:x={x}:y={y}:enable='between(t,{start_time},{start_time + duration})'"
+        
+        (
+            ffmpeg
+            .input(temp_input)
+            .output(temp_output, vf=text_filter, codec='libx264', preset='fast')
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        
+        return FileResponse(
+            temp_output,
+            media_type="video/mp4",
+            filename="text_overlay.mp4"
+        )
+    except ffmpeg.Error as e:
+        logger.error(f"FFmpeg error: {e.stderr.decode()}")
+        raise HTTPException(status_code=500, detail="Text overlay failed")
+    finally:
+        cleanup_file(temp_input)
+
+@api_router.post("/video/transition")
+async def add_transition(
+    file1: UploadFile = File(...),
+    file2: UploadFile = File(...),
+    transition_type: str = Form("fade"),
+    duration: float = Form(1.0)
+):
+    """Add transition between two videos"""
+    temp_input1 = get_temp_path()
+    temp_input2 = get_temp_path()
+    temp_output = get_temp_path()
+    
+    try:
+        # Save uploaded files
+        with open(temp_input1, "wb") as buffer:
+            shutil.copyfileobj(file1.file, buffer)
+        with open(temp_input2, "wb") as buffer:
+            shutil.copyfileobj(file2.file, buffer)
+        
+        # Create transition based on type
+        input1 = ffmpeg.input(temp_input1)
+        input2 = ffmpeg.input(temp_input2)
+        
+        if transition_type == "fade":
+            transition = ffmpeg.filter([input1, input2], 'xfade', transition='fade', duration=duration)
+        elif transition_type == "dissolve":
+            transition = ffmpeg.filter([input1, input2], 'xfade', transition='dissolve', duration=duration)
+        elif transition_type == "wipe":
+            transition = ffmpeg.filter([input1, input2], 'xfade', transition='wipeleft', duration=duration)
+        elif transition_type == "slide":
+            transition = ffmpeg.filter([input1, input2], 'xfade', transition='slideleft', duration=duration)
+        else:
+            transition = ffmpeg.filter([input1, input2], 'xfade', transition='fade', duration=duration)
+        
+        (
+            ffmpeg
+            .output(transition, temp_output, codec='libx264', preset='medium')
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        
+        return FileResponse(
+            temp_output,
+            media_type="video/mp4",
+            filename=f"transition_{transition_type}.mp4"
+        )
+    except ffmpeg.Error as e:
+        logger.error(f"FFmpeg error: {e.stderr.decode()}")
+        raise HTTPException(status_code=500, detail="Transition failed")
+    finally:
+        cleanup_file(temp_input1)
+        cleanup_file(temp_input2)
+
+
 @api_router.post("/video/export")
 async def export_video(
     file: UploadFile = File(...),

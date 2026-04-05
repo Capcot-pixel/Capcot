@@ -56,7 +56,7 @@ export default function HomeScreen() {
         });
         
         // Navigate to editor
-        router.push('/editor');
+        router.push('/editor-v2');
       }
     } catch (error) {
       console.error('Error picking video:', error);
