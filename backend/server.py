@@ -108,7 +108,7 @@ async def create_status_check(input: StatusCheckCreate):
 
 @api_router.get("/status", response_model=List[StatusCheck])
 async def get_status_checks():
-    status_checks = await db.status_checks.find().to_list(1000)
+    status_checks = await db.status_checks.find({}, {'_id': 0}).sort('timestamp', -1).limit(100).to_list(100)
     return [StatusCheck(**status_check) for status_check in status_checks]
 
 # Video Processing Endpoints
@@ -123,7 +123,7 @@ async def create_project(name: str = Form(...)):
 @api_router.get("/projects", response_model=List[VideoProject])
 async def get_projects():
     """Get all projects"""
-    projects = await db.projects.find().to_list(100)
+    projects = await db.projects.find({}, {'_id': 0}).sort('updated_at', -1).limit(100).to_list(100)
     return [VideoProject(**project) for project in projects]
 
 @api_router.get("/projects/{project_id}")
