@@ -1,1 +1,1 @@
-# Here are your Instructions
+I want to all the coders to make a app Capcot which is just copy of Capcut for INDIA users
